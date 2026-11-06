@@ -1,0 +1,4 @@
+node_modules/
+tools/video/remotion/public/
+tools/video/remotion/out/
+*.bak
