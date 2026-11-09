@@ -6,7 +6,7 @@ MODULE PalletProgram
     ! Authors: Peru Mendivil and Joaquin Moreno
     ! Robot :   ABB IRB 1600-10/1.45, IRC5 RobotWare 6.13.02 (RobotStudio 2025)
     ! Tool  :   toolVacuum, vacuum gripper with 6 cups (one valve per cup)
-    ! Date:    2026-10-30
+    ! Date:    2026-11-09
     !
     ! The robot palletizes two products coming on two conveyors.
     ! Box 1 goes from conveyor 1 to the Euro pallet: 4-2 pattern,
@@ -61,6 +61,10 @@ MODULE PalletProgram
     !-----------------------------------------------------------------------
     CONST speeddata TransitSpeed:=v1000;
     CONST speeddata ApproachSpeed:=v300;
+    CONST speeddata HomeSpeed:=v100;
+    ! Zone of the retract move after a pick or a place
+    CONST zonedata PickRetractZone:=z10;    ! next move (transit) is known: blend
+    CONST zonedata PlaceRetractZone:=fine;  ! next move depends on Main: stop
 
     ! Height of every station (world)
     CONST num ConveyorsHeight:=768;
@@ -198,7 +202,7 @@ MODULE PalletProgram
         CONNECT linersRefilledInt WITH LinersRefilledTrap;
         ISignalDI DI_LinersRefilled,1,linersRefilledInt;
         GripLoad load0;
-        MoveAbsJ Home,v100,fine,toolVacuum;
+        MoveAbsJ Home,HomeSpeed,fine,toolVacuum;
 
         WHILE TRUE DO
 
@@ -301,27 +305,27 @@ MODULE PalletProgram
         ! Z of the current layer on the Euro pallet
         VAR num layerZ;
 
-        ApproachPoint PickConveyor1,wobjConveyor1,CupsAllOn,loadBox1,ApproachHeight(StationConveyor1);
+        ApproachPoint PickConveyor1,wobjConveyor1,CupsAllOn,loadBox1,ApproachHeight(StationConveyor1),PickRetractZone;
 
         layerZ:=(box1Layer-1)*Box1Height;
         TEST box1State
         CASE Box1Pos1:
-            ApproachPoint Offs(PlaceEuroRow4,0,0,layerZ),wobjEuroPallet,CupsAllOff,load0,ApproachHeight(StationEuroPallet);
+            ApproachPoint Offs(PlaceEuroRow4,0,0,layerZ),wobjEuroPallet,CupsAllOff,load0,ApproachHeight(StationEuroPallet),PlaceRetractZone;
             box1State:=Box1Pos2;
         CASE Box1Pos2:
-            ApproachPoint Offs(PlaceEuroRow4,EuroRow4Offset,0,layerZ),wobjEuroPallet,CupsAllOff,load0,ApproachHeight(StationEuroPallet);
+            ApproachPoint Offs(PlaceEuroRow4,EuroRow4Offset,0,layerZ),wobjEuroPallet,CupsAllOff,load0,ApproachHeight(StationEuroPallet),PlaceRetractZone;
             box1State:=Box1Pos3;
         CASE Box1Pos3:
-            ApproachPoint Offs(PlaceEuroRow4,2*EuroRow4Offset,0,layerZ),wobjEuroPallet,CupsAllOff,load0,ApproachHeight(StationEuroPallet);
+            ApproachPoint Offs(PlaceEuroRow4,2*EuroRow4Offset,0,layerZ),wobjEuroPallet,CupsAllOff,load0,ApproachHeight(StationEuroPallet),PlaceRetractZone;
             box1State:=Box1Pos4;
         CASE Box1Pos4:
-            ApproachPoint Offs(PlaceEuroRow4,3*EuroRow4Offset,0,layerZ),wobjEuroPallet,CupsAllOff,load0,ApproachHeight(StationEuroPallet);
+            ApproachPoint Offs(PlaceEuroRow4,3*EuroRow4Offset,0,layerZ),wobjEuroPallet,CupsAllOff,load0,ApproachHeight(StationEuroPallet),PlaceRetractZone;
             box1State:=Box1Pos5;
         CASE Box1Pos5:
-            ApproachPoint Offs(PlaceEuroRow2,0,0,layerZ),wobjEuroPallet,CupsAllOff,load0,ApproachHeight(StationEuroPallet);
+            ApproachPoint Offs(PlaceEuroRow2,0,0,layerZ),wobjEuroPallet,CupsAllOff,load0,ApproachHeight(StationEuroPallet),PlaceRetractZone;
             box1State:=Box1LastPos;
         CASE Box1LastPos:
-            ApproachPoint Offs(PlaceEuroRow2,EuroRow2Offset,0,layerZ),wobjEuroPallet,CupsAllOff,load0,ApproachHeight(StationEuroPallet);
+            ApproachPoint Offs(PlaceEuroRow2,EuroRow2Offset,0,layerZ),wobjEuroPallet,CupsAllOff,load0,ApproachHeight(StationEuroPallet),PlaceRetractZone;
             IF box1Layer=Box1MaxLayers THEN
                 euroPalletFull:=TRUE;
                 SetDO DO_EuroPalletFull,1;
@@ -341,27 +345,27 @@ MODULE PalletProgram
     !-----------------------------------------------------------------------
     PROC ProcessBox2()
 
-        ApproachPoint PickConveyor2,wobjConveyor2,CupsBox2On,loadBox2,ApproachHeight(StationConveyor2);
+        ApproachPoint PickConveyor2,wobjConveyor2,CupsBox2On,loadBox2,ApproachHeight(StationConveyor2),PickRetractZone;
 
         ! Far row (y=130) first and x from high to low: the box carried never crosses the boxes already placed
         TEST box2State
         CASE Box2Pos1:
-            ApproachPoint Offs(PlaceTable,2*Box2Offset,Box2Offset,0),wobjTable,CupsAllOff,load0,ApproachHeight(StationTable);
+            ApproachPoint Offs(PlaceTable,2*Box2Offset,Box2Offset,0),wobjTable,CupsAllOff,load0,ApproachHeight(StationTable),PlaceRetractZone;
             box2State:=Box2Pos2;
         CASE Box2Pos2:
-            ApproachPoint Offs(PlaceTable,Box2Offset,Box2Offset,0),wobjTable,CupsAllOff,load0,ApproachHeight(StationTable);
+            ApproachPoint Offs(PlaceTable,Box2Offset,Box2Offset,0),wobjTable,CupsAllOff,load0,ApproachHeight(StationTable),PlaceRetractZone;
             box2State:=Box2Pos3;
         CASE Box2Pos3:
-            ApproachPoint Offs(PlaceTable,0,Box2Offset,0),wobjTable,CupsAllOff,load0,ApproachHeight(StationTable);
+            ApproachPoint Offs(PlaceTable,0,Box2Offset,0),wobjTable,CupsAllOff,load0,ApproachHeight(StationTable),PlaceRetractZone;
             box2State:=Box2Pos4;
         CASE Box2Pos4:
-            ApproachPoint Offs(PlaceTable,2*Box2Offset,0,0),wobjTable,CupsAllOff,load0,ApproachHeight(StationTable);
+            ApproachPoint Offs(PlaceTable,2*Box2Offset,0,0),wobjTable,CupsAllOff,load0,ApproachHeight(StationTable),PlaceRetractZone;
             box2State:=Box2Pos5;
         CASE Box2Pos5:
-            ApproachPoint Offs(PlaceTable,Box2Offset,0,0),wobjTable,CupsAllOff,load0,ApproachHeight(StationTable);
+            ApproachPoint Offs(PlaceTable,Box2Offset,0,0),wobjTable,CupsAllOff,load0,ApproachHeight(StationTable),PlaceRetractZone;
             box2State:=Box2LastPos;
         CASE Box2LastPos:
-            ApproachPoint Offs(PlaceTable,0,0,0),wobjTable,CupsAllOff,load0,ApproachHeight(StationTable);
+            ApproachPoint Offs(PlaceTable,0,0,0),wobjTable,CupsAllOff,load0,ApproachHeight(StationTable),PlaceRetractZone;
             IF halfPalletFull OR linerMissing THEN
                 tableFull:=TRUE;
             ELSE
@@ -382,22 +386,22 @@ MODULE PalletProgram
         VAR num layerZ;
 
         ! Pick all 6 boxes 2
-        ApproachPoint PickTableStack,wobjTable,CupsAllOn,loadBox2Stack,ApproachHeight(StationTable);
+        ApproachPoint PickTableStack,wobjTable,CupsAllOn,loadBox2Stack,ApproachHeight(StationTable),PickRetractZone;
 
         ! Place group of boxes
         layerZ:=HalfPalletLayerZ();
         TEST blockState
         CASE BlockPos1:
-            ApproachPoint Offs(PlaceHalfPallet,0,BlockOffsetY,layerZ),wobjHalfPallet,CupsAllOff,load0,ApproachHeight(StationHalfPallet);
+            ApproachPoint Offs(PlaceHalfPallet,0,BlockOffsetY,layerZ),wobjHalfPallet,CupsAllOff,load0,ApproachHeight(StationHalfPallet),PlaceRetractZone;
             blockState:=BlockPos2;
         CASE BlockPos2:
-            ApproachPoint Offs(PlaceHalfPallet,BlockOffsetX,BlockOffsetY,layerZ),wobjHalfPallet,CupsAllOff,load0,ApproachHeight(StationHalfPallet);
+            ApproachPoint Offs(PlaceHalfPallet,BlockOffsetX,BlockOffsetY,layerZ),wobjHalfPallet,CupsAllOff,load0,ApproachHeight(StationHalfPallet),PlaceRetractZone;
             blockState:=BlockPos3;
         CASE BlockPos3:
-            ApproachPoint Offs(PlaceHalfPallet,0,0,layerZ),wobjHalfPallet,CupsAllOff,load0,ApproachHeight(StationHalfPallet);
+            ApproachPoint Offs(PlaceHalfPallet,0,0,layerZ),wobjHalfPallet,CupsAllOff,load0,ApproachHeight(StationHalfPallet),PlaceRetractZone;
             blockState:=BlockPos4;
         CASE BlockPos4:
-            ApproachPoint Offs(PlaceHalfPallet,BlockOffsetX,0,layerZ),wobjHalfPallet,CupsAllOff,load0,ApproachHeight(StationHalfPallet);
+            ApproachPoint Offs(PlaceHalfPallet,BlockOffsetX,0,layerZ),wobjHalfPallet,CupsAllOff,load0,ApproachHeight(StationHalfPallet),PlaceRetractZone;
             IF box2Layer=Box2MaxLayers THEN
                 halfPalletFull:=TRUE;
                 SetDO DO_HalfPalletFull,1;
@@ -417,8 +421,8 @@ MODULE PalletProgram
     ! Liner on the layer just finished, then the next layer starts
     !-----------------------------------------------------------------------
     PROC PlaceLayerLiner()
-        ApproachPoint Offs(PickLiner,0,0,-(TotalLiners-linersLeft)*LinerHeight),wobjLinerStack,CupsAllOn,loadLiner,ApproachHeight(StationLinerStand);
-        ApproachPoint Offs(PlaceLiner,0,0,HalfPalletLayerZ()),wobjHalfPallet,CupsAllOff,load0,ApproachHeight(StationHalfPallet);
+        ApproachPoint Offs(PickLiner,0,0,-(TotalLiners-linersLeft)*LinerHeight),wobjLinerStack,CupsAllOn,loadLiner,ApproachHeight(StationLinerStand),PickRetractZone;
+        ApproachPoint Offs(PlaceLiner,0,0,HalfPalletLayerZ()),wobjHalfPallet,CupsAllOff,load0,ApproachHeight(StationHalfPallet),PlaceRetractZone;
         Incr box2Layer;
         Decr linersLeft;
         IF linersLeft=0 THEN
@@ -439,13 +443,14 @@ MODULE PalletProgram
     !-----------------------------------------------------------------------
     ! Pick or place at a target: approach, vacuum, GripLoad and go up
     !-----------------------------------------------------------------------
-    PROC ApproachPoint(robtarget target,PERS wobjdata wobj,bool cups{*},PERS loaddata load,num approachHeight)
+    PROC ApproachPoint(robtarget target,PERS wobjdata wobj,bool cups{*},PERS loaddata load,num approachHeight,zonedata exitZone)
         ! cups: cups on/off at the target, load: load after the target
+        ! exitZone: zone of the retract move (fine after a place, so the robot stops before Main decides)
         MoveJ Offs(target,0,0,approachHeight),TransitSpeed,z10,toolVacuum\WObj:=wobj;
         MoveL target,ApproachSpeed,fine,toolVacuum\WObj:=wobj;
         VacuumControl cups;
         GripLoad load;
-        MoveL Offs(target,0,0,approachHeight),ApproachSpeed,z10,toolVacuum\WObj:=wobj;
+        MoveL Offs(target,0,0,approachHeight),ApproachSpeed,exitZone,toolVacuum\WObj:=wobj;
     ENDPROC
 
     !-----------------------------------------------------------------------
