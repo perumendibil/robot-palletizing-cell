@@ -27,7 +27,9 @@ MODULE PalletProgram
     ! Each product has its own routine with a finite-state machine for
     ! the place positions. Every place position is calculated with Offs
     ! from one base target per station. ApproachPoint does every
-    ! pick/place: approach, vacuum on/off and GripLoad. Work objects,
+    ! pick/place: approach, vacuum on/off and GripLoad. In a pick, the
+    ! robot waits until the analog signal AI_VacuumPressure reaches the
+    ! pressure needed for that load (GripWithVacuum). Work objects,
     ! tool and loads are in the module CalibData.
     ! The operator buttons (pallet replaced, liners refilled) are read
     ! with interrupts (TRAP), so a short press is never lost.
@@ -92,7 +94,17 @@ MODULE PalletProgram
     !-----------------------------------------------------------------------
     ! Vacuum gripper
     !-----------------------------------------------------------------------
-    CONST num VacuumTime:=1;
+    ! Vacuum pressure needed to lift each load (bar), read from AI_VacuumPressure
+    CONST num PressureBox1:=4;
+    CONST num PressureBox2:=2;
+    ! Block of 6 boxes 2: one box per cup, same pressure as one box 2 (assumption)
+    CONST num PressureStack:=2;
+    ! Liner: light load shared by the 6 cups (assumption)
+    CONST num PressureLiner:=2;
+    ! Maximum time to reach the pressure before reporting an error (s)
+    CONST num VacuumMaxTime:=2;
+    ! Time to let the vacuum out after closing the valves (s)
+    CONST num ReleaseTime:=1;
     CONST bool CupsAllOn{6}:=[TRUE,TRUE,TRUE,TRUE,TRUE,TRUE];
     CONST bool CupsAllOff{6}:=[FALSE,FALSE,FALSE,FALSE,FALSE,FALSE];
     CONST bool CupsBox2On{6}:=[FALSE,FALSE,FALSE,TRUE,FALSE,FALSE];
@@ -305,7 +317,7 @@ MODULE PalletProgram
         ! Z of the current layer on the Euro pallet
         VAR num layerZ;
 
-        ApproachPoint PickConveyor1,wobjConveyor1,CupsAllOn,loadBox1,ApproachHeight(StationConveyor1),PickRetractZone;
+        ApproachPoint PickConveyor1,wobjConveyor1,CupsAllOn,loadBox1,ApproachHeight(StationConveyor1),PickRetractZone\pressure:=PressureBox1;
 
         layerZ:=(box1Layer-1)*Box1Height;
         TEST box1State
@@ -345,7 +357,7 @@ MODULE PalletProgram
     !-----------------------------------------------------------------------
     PROC ProcessBox2()
 
-        ApproachPoint PickConveyor2,wobjConveyor2,CupsBox2On,loadBox2,ApproachHeight(StationConveyor2),PickRetractZone;
+        ApproachPoint PickConveyor2,wobjConveyor2,CupsBox2On,loadBox2,ApproachHeight(StationConveyor2),PickRetractZone\pressure:=PressureBox2;
 
         ! Far row (y=130) first and x from high to low: the box carried never crosses the boxes already placed
         TEST box2State
@@ -386,7 +398,7 @@ MODULE PalletProgram
         VAR num layerZ;
 
         ! Pick all 6 boxes 2
-        ApproachPoint PickTableStack,wobjTable,CupsAllOn,loadBox2Stack,ApproachHeight(StationTable),PickRetractZone;
+        ApproachPoint PickTableStack,wobjTable,CupsAllOn,loadBox2Stack,ApproachHeight(StationTable),PickRetractZone\pressure:=PressureStack;
 
         ! Place group of boxes
         layerZ:=HalfPalletLayerZ();
@@ -421,7 +433,7 @@ MODULE PalletProgram
     ! Liner on the layer just finished, then the next layer starts
     !-----------------------------------------------------------------------
     PROC PlaceLayerLiner()
-        ApproachPoint Offs(PickLiner,0,0,-(TotalLiners-linersLeft)*LinerHeight),wobjLinerStack,CupsAllOn,loadLiner,ApproachHeight(StationLinerStand),PickRetractZone;
+        ApproachPoint Offs(PickLiner,0,0,-(TotalLiners-linersLeft)*LinerHeight),wobjLinerStack,CupsAllOn,loadLiner,ApproachHeight(StationLinerStand),PickRetractZone\pressure:=PressureLiner;
         ApproachPoint Offs(PlaceLiner,0,0,HalfPalletLayerZ()),wobjHalfPallet,CupsAllOff,load0,ApproachHeight(StationHalfPallet),PlaceRetractZone;
         Incr box2Layer;
         Decr linersLeft;
@@ -443,12 +455,20 @@ MODULE PalletProgram
     !-----------------------------------------------------------------------
     ! Pick or place at a target: approach, vacuum, GripLoad and go up
     !-----------------------------------------------------------------------
-    PROC ApproachPoint(robtarget target,PERS wobjdata wobj,bool cups{*},PERS loaddata load,num approachHeight,zonedata exitZone)
+    PROC ApproachPoint(robtarget target,PERS wobjdata wobj,bool cups{*},PERS loaddata load,num approachHeight,zonedata exitZone\num pressure)
         ! cups: cups on/off at the target, load: load after the target
         ! exitZone: zone of the retract move (fine after a place, so the robot stops before Main decides)
+        ! pressure (optional): given in a pick, it is the vacuum pressure needed to lift the load (bar)
         MoveJ Offs(target,0,0,approachHeight),TransitSpeed,z10,toolVacuum\WObj:=wobj;
         MoveL target,ApproachSpeed,fine,toolVacuum\WObj:=wobj;
-        VacuumControl cups;
+        IF Present(pressure) THEN
+            ! Pick: valves on and wait for the pressure signal
+            GripWithVacuum cups,pressure;
+        ELSE
+            ! Place: valves off and time to let the vacuum out
+            VacuumControl cups;
+            WaitTime\InPos,ReleaseTime;
+        ENDIF
         GripLoad load;
         MoveL Offs(target,0,0,approachHeight),ApproachSpeed,exitZone,toolVacuum\WObj:=wobj;
     ENDPROC
@@ -497,7 +517,7 @@ MODULE PalletProgram
     ENDPROC
 
     !-----------------------------------------------------------------------
-    ! Control of the vacuum of every cup
+    ! Valves of the cups: open or close each one (no waiting here)
     !-----------------------------------------------------------------------
     PROC VacuumControl(bool cups{*})
 
@@ -508,9 +528,27 @@ MODULE PalletProgram
                 SetDO cupSignals{i},0;
             ENDIF
         ENDFOR
+    ENDPROC
 
-        ! Robot stopped in position, wait for the vacuum
-        WaitTime\InPos,VacuumTime;
+    !-----------------------------------------------------------------------
+    ! Pick: open the valves and wait until the vacuum pressure is reached
+    !-----------------------------------------------------------------------
+    PROC GripWithVacuum(bool cups{*},num requiredPressure)
+        ! TRUE while the pressure has not been reached (starts TRUE to enter the loop)
+        VAR bool timedOut:=TRUE;
+
+        WHILE timedOut DO
+            VacuumControl cups;
+            ! Robot stopped in position, wait for the analog pressure signal
+            WaitUntil\InPos,AI_VacuumPressure>=requiredPressure\MaxTime:=VacuumMaxTime\TimeFlag:=timedOut;
+            IF timedOut THEN
+                ! Pressure not reached in time: valves off, error to the operator and stop.
+                ! After the restart the loop tries the pick again, so the robot never goes up without the load.
+                VacuumControl CupsAllOff;
+                ErrWrite "Vacuum pressure not reached","Pressure "+NumToStr(AInput(AI_VacuumPressure),1)+" bar, required "+NumToStr(requiredPressure,1)+" bar";
+                Stop;
+            ENDIF
+        ENDWHILE
     ENDPROC
 
 ENDMODULE
